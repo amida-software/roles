@@ -4,6 +4,7 @@ namespace Bican\Roles\Traits;
 
 use Illuminate\Support\Str;
 use Illuminate\Database\Eloquent\Model;
+use Bican\Roles\Models\Permission;
 use InvalidArgumentException;
 
 trait HasRoleAndPermission
@@ -177,7 +178,10 @@ trait HasRoleAndPermission
      */
     public function userPermissions()
     {
-        return $this->belongsToMany(config('roles.models.permission'))->withTimestamps();
+        return $this
+            ->belongsToMany(config('roles.models.permission'))
+            ->withPivot('model_id')
+            ->withTimestamps();
     }
 
     /**
@@ -249,6 +253,14 @@ trait HasRoleAndPermission
     public function hasPermission($permission)
     {
         return $this->getPermissions()->contains(function ($value, $key) use ($permission) {
+            if ($value
+                    ->pivot 
+                && $value
+                    ->pivot
+                    ->model_id) {
+                return false;
+            }
+
             return $permission == $value->id || Str::is($permission, $value->slug);
         });
     }
@@ -257,19 +269,12 @@ trait HasRoleAndPermission
      * Check if the user is allowed to manipulate with entity.
      *
      * @param string $providedPermission
-     * @param \Illuminate\Database\Eloquent\Model $entity
-     * @param bool $owner
-     * @param string $ownerColumn
-     * @return bool
+     * @param int|\Illuminate\Database\Eloquent\Model $entity
      */
-    public function allowed($providedPermission, Model $entity, $owner = true, $ownerColumn = 'user_id')
+    public function allowed($providedPermission, $entity)
     {
         if ($this->isPretendEnabled()) {
             return $this->pretend('allowed');
-        }
-
-        if ($owner === true && $entity->{$ownerColumn} == $this->id) {
-            return true;
         }
 
         return $this->isAllowed($providedPermission, $entity);
@@ -279,14 +284,27 @@ trait HasRoleAndPermission
      * Check if the user is allowed to manipulate with provided entity.
      *
      * @param string $providedPermission
-     * @param \Illuminate\Database\Eloquent\Model $entity
+     * @param int|\Illuminate\Database\Eloquent\Model $entity
      * @return bool
      */
-    protected function isAllowed($providedPermission, Model $entity)
+    protected function isAllowed($providedPermission, $entity)
     {
+        if ($entity instanceof Model) {
+            $model_id = $entity->id;
+        } else {
+            $model_id = $entity;
+        }
+
         foreach ($this->getPermissions() as $permission) {
-            if ($permission->model != '' && get_class($entity) == $permission->model
-                && ($permission->id == $providedPermission || $permission->slug === $providedPermission)
+            if ((!$permission->pivot
+                    || !$permission
+                            ->pivot
+                            ->model_id
+                    || ($permission
+                        ->pivot
+                        ->model_id == $model_id))
+                && ($permission->id == $providedPermission 
+                        || $permission->slug === $providedPermission)
             ) {
                 return true;
             }
@@ -299,24 +317,72 @@ trait HasRoleAndPermission
      * Attach permission to a user.
      *
      * @param int|\Bican\Roles\Models\Permission $permission
+     * @param null|int|\Illuminate\Database\Eloquent\Model $entity
      * @return null|bool
      */
-    public function attachPermission($permission)
+    public function attachPermission($permission, $entity = null)
     {
-        return (!$this->getPermissions()->contains($permission)) ? $this->userPermissions()->attach($permission) : true;
+        if ($permission instanceof Permission) {
+            $permission_id = $permission->id;
+        } else {
+            $permission_id = $permission;
+        }
+
+        if ($entity instanceof Model) {
+            $model_id = $entity->id;
+        } else {
+            $model_id = $entity;
+        }
+        
+        if ($this->getPermissions()->contains(function($value, $key) use ($permission_id, $model_id) {
+            if ($model_id) {
+                return $value
+                        ->pivot
+                    && ($value
+                        ->pivot
+                        ->model_id == $model_id)
+                    && ($value->id == $permission_id);    
+            }
+            
+            if ($value
+                    ->pivot 
+                && $value
+                    ->pivot
+                    ->model_id) {
+                return false;
+            }
+
+            return $value->id == $permission_id;
+        })) {
+            return true;
+        } else {
+            return $this
+                ->userPermissions()
+                ->attach($permission, ['model_id' => $model_id]);
+        }
     }
 
     /**
      * Detach permission from a user.
      *
      * @param int|\Bican\Roles\Models\Permission $permission
+     * @param null|int|\Illuminate\Database\Eloquent\Model $entity
      * @return int
      */
-    public function detachPermission($permission)
+    public function detachPermission($permission, $entity = null)
     {
+        if ($entity instanceof Model) {
+            $model_id = $entity->id;
+        } else {
+            $model_id = $entity;
+        }
+
         $this->permissions = null;
 
-        return $this->userPermissions()->detach($permission);
+        return $this
+            ->userPermissions()
+            ->wherePivot('model_id', $model_id)
+            ->detach($permission);
     }
 
     /**
@@ -389,7 +455,7 @@ trait HasRoleAndPermission
         } elseif (starts_with($method, 'may')) {
             return $this->may(snake_case(substr($method, 3), config('roles.separator')));
         } elseif (starts_with($method, 'allowed')) {
-            return $this->allowed(snake_case(substr($method, 7), config('roles.separator')), $parameters[0], (isset($parameters[1])) ? $parameters[1] : true, (isset($parameters[2])) ? $parameters[2] : 'user_id');
+            return $this->allowed(snake_case(substr($method, 7), config('roles.separator')), $parameters[0]);
         }
 
         return parent::__call($method, $parameters);
