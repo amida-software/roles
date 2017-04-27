@@ -191,7 +191,16 @@ trait HasRoleAndPermission
      */
     public function getPermissions()
     {
-        return (!$this->permissions) ? $this->permissions = $this->rolePermissions()->get()->merge($this->userPermissions()->get()) : $this->permissions;
+        if ($this->permissions) {
+            return $this->permissions;
+        }
+
+        return $this->permissions = $this
+                ->rolePermissions()
+                ->get()
+                ->reduce(function($carry, $permission) {
+                    return $carry->push($permission);
+                }, $this->userPermissions);
     }
 
     /**
