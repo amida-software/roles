@@ -2,8 +2,6 @@
 
 namespace Bican\Roles\Contracts;
 
-use Illuminate\Database\Eloquent\Model;
-
 interface HasRoleAndPermission
 {
     /**
@@ -125,12 +123,9 @@ interface HasRoleAndPermission
      * Check if the user is allowed to manipulate with entity.
      *
      * @param string $providedPermission
-     * @param \Illuminate\Database\Eloquent\Model $entity
-     * @param bool $owner
-     * @param string $ownerColumn
-     * @return bool
+     * @param $entity
      */
-    public function allowed($providedPermission, Model $entity, $owner = true, $ownerColumn = 'user_id');
+    public function allowed($providedPermission, $entity);
 
     /**
      * Attach permission to a user.
